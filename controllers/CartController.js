@@ -1,27 +1,35 @@
 const CartModel = require("../models/CartModel");
 
 /**
- * Send standardized error response
+ * Standard error handler
  */
 const handleError = (res, error) => {
   console.error(error);
-  res
-    .status(500)
-    .json({ success: false, message: error.message || "Server Error" });
+  res.status(500).json({
+    success: false,
+    message: error.message || "Server Error",
+  });
 };
 
 /**
- * Utility to find item index in cart by product and custom config
+ * Helper to safely compare `custom` configs
+ */
+const compareCustom = (a, b) => {
+  return JSON.stringify(a || {}) === JSON.stringify(b || {});
+};
+
+/**
+ * Utility to find cart item index
  */
 const findItemIndex = (items, productId, custom) =>
   items.findIndex(
     (item) =>
       item.product.toString() === productId &&
-      JSON.stringify(item.custom) === JSON.stringify(custom)
+      compareCustom(item.custom, custom)
   );
 
 /**
- * ✅ Add item to cart
+ * ✅ Add to Cart
  */
 exports.addToCart = async (req, res) => {
   try {
@@ -42,7 +50,6 @@ exports.addToCart = async (req, res) => {
     }
 
     await cart.save();
-
     res.status(201).json({
       success: true,
       message: "Product added to cart successfully",
@@ -54,16 +61,14 @@ exports.addToCart = async (req, res) => {
 };
 
 /**
- * ✅ Get current user's cart
+ * ✅ Get Cart
  */
 exports.getCart = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const cart = await CartModel.findOne({ user: userId }).populate(
       "items.product"
     );
-
     res.json({ success: true, data: cart?.items || [] });
   } catch (error) {
     handleError(res, error);
@@ -71,12 +76,13 @@ exports.getCart = async (req, res) => {
 };
 
 /**
- * ✅ Update quantity for a cart item
+ * ✅ Update Quantity
  */
+
 exports.updateQuantity = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { productId, custom = null, quantity } = req.body;
+    const { productId, custom = null, quantity = 1, type = "set" } = req.body;
 
     const cart = await CartModel.findOne({ user: userId });
     if (!cart) {
@@ -92,21 +98,40 @@ exports.updateQuantity = async (req, res) => {
         .json({ success: false, message: "Item not found in cart" });
     }
 
-    if (quantity <= 0) {
-      cart.items.splice(itemIndex, 1);
+    const item = cart.items[itemIndex];
+    const qty = Number(quantity);
+
+    if (type === "increase") {
+      item.quantity += qty;
+    } else if (type === "decrease") {
+      item.quantity -= qty;
+      if (item.quantity <= 0) {
+        cart.items.splice(itemIndex, 1); // remove item
+      }
     } else {
-      cart.items[itemIndex].quantity = quantity;
+      // default is set quantity directly
+      if (qty <= 0) {
+        cart.items.splice(itemIndex, 1);
+      } else {
+        item.quantity = qty;
+      }
     }
 
     await cart.save();
-    res.json({ success: true, message: "Quantity updated successfully", cart });
+
+    res.json({
+      success: true,
+      message:
+        type === "set" ? "Quantity updated" : `Quantity ${type}d successfully`,
+      cart,
+    });
   } catch (error) {
     handleError(res, error);
   }
 };
 
 /**
- * ✅ Remove item from cart
+ * ✅ Remove from Cart
  */
 exports.removeFromCart = async (req, res) => {
   try {
